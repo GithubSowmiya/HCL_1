@@ -1,0 +1,78 @@
+/*
+ * Layer 1 - Camera Sensor
+ * Reads frame brightness and crowd noise, sends to Layer 2 via UDP.
+ *
+ * Compile: gcc camera_sensor.c -o camera_sensor -lm
+ * Run:     ./camera_sensor
+ */
+
+#include <stdio.h>
+#include <math.h>
+#include <unistd.h>
+#include <string.h>
+#include <arpa/inet.h>
+
+#define TOTAL_FRAMES  200
+#define FPS           25
+#define PORT          9000
+
+/* Returns simulated brightness for a given frame */
+float get_brightness(int frame_num) {
+    return 150.0 + 50.0 * sin(frame_num * 0.1);
+}
+
+/* Returns crowd noise level 0.0 to 1.0 */
+float get_crowd_noise(int frame_num) {
+    if (frame_num >= 48 && frame_num <= 55)   return 0.95;  /* six */
+    if (frame_num >= 98 && frame_num <= 105)  return 0.80;  /* wicket */
+    if (frame_num >= 148 && frame_num <= 155) return 0.90;  /* six */
+    return 0.10 + (frame_num % 5) * 0.02;
+}
+
+/* Returns 1 if ball is near boundary, 0 otherwise */
+int is_ball_near_boundary(int frame_num) {
+    return (frame_num >= 50 && frame_num <= 55) ? 1 : 0;
+}
+
+int main() {
+    printf("Layer 1: Camera Sensor started\n\n");
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        printf("ERROR: socket creation failed\n");
+        return 1;
+    }
+
+    struct sockaddr_in dest;
+    memset(&dest, 0, sizeof(dest));
+    dest.sin_family      = AF_INET;
+    dest.sin_port        = htons(PORT);
+    dest.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    printf("Sending frames to port %d...\n\n", PORT);
+
+    int frame;
+    for (frame = 0; frame < TOTAL_FRAMES; frame++) {
+        float time_sec   = (float)frame / FPS;
+        float brightness = get_brightness(frame);
+        float crowd      = get_crowd_noise(frame);
+        int   boundary   = is_ball_near_boundary(frame);
+
+        char message[256];
+        sprintf(message, "FRAME:%d|TIME:%.2f|BRIGHT:%.1f|CROWD:%.2f|BOUNDARY:%d\n",
+                frame, time_sec, brightness, crowd, boundary);
+
+        sendto(sock, message, strlen(message), 0,
+               (struct sockaddr*)&dest, sizeof(dest));
+
+        if (frame % 25 == 0) {
+            printf("[frame %3d] t=%.1fs  brightness=%.1f  crowd=%.2f  boundary=%d\n",
+                   frame, time_sec, brightness, crowd, boundary);
+        }
+
+        usleep(40000);  /* 40ms = 25fps */
+    }
+
+    printf("\nDone. Sent %d frames.\n", TOTAL_FRAMES);
+    return 0;
+}
